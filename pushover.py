@@ -40,50 +40,88 @@
 # 2020-09-02, au <ccm@screenage.de>:
 #     version 0.3: update to python3 (replace urllib2 with new urllib)
 #                  fix minor code glitches with python 3
-
 import weechat, string, os, http.client, urllib
 
-weechat.register("pushover", "Caspar Clemens Mierau <ccm@screenage.de>", "0.3", "GPL", "pushover: Send push notifications to you iPhone/Android about your private message and hiligts.", "", "")
+
+weechat.register(
+    'pushover',
+    'Caspar Clemens Mierau <ccm@screenage.de>',
+    '0.3',
+    'GPL',
+    (
+        'pushover: Send push notifications to you iPhone/Android'
+        'about your private message and hilights.'
+    ),
+    '',
+    ''
+)
 
 settings = {
-    "user": "",
-    "token": "",
+    'user': '',
+    'token': '',
 }
 
 for option, default_value in list(settings.items()):
-    if weechat.config_get_plugin(option) == "":
-        weechat.prnt("", weechat.prefix("error") + "pushover: Please set option: %s" % option)
-        weechat.prnt("", "pushover: /set plugins.var.python.pushover.%s STRING" % option)
+    if not weechat.config_get_plugin(option):
+        weechat.prnt('', f'{weechat.prefix("error")}pushover: Please set option: {option}')
+        weechat.prnt('', f'pushover: /set plugins.var.python.pushover.{option} STRING')
+
 
 # Hook privmsg/hilights
-weechat.hook_print('', '','', 1, 'notify_show', '')
+weechat.hook_print('', '','', 1, 'print_hook', '')
+
 
 # Functions
-def notify_show(data, bufferp, uber_empty, tagsn, isdisplayed, ishilight, prefix, message):
+def print_hook(data, bufferp, uber_empty, tagsn, isdisplayed, ishilight, prefix, message):
+    # Get local nick for buffer
+    mynick = weechat.buffer_get_string(bufferp, 'localvar_nick')
 
-    #get local nick for buffer
-    mynick = weechat.buffer_get_string(bufferp,"localvar_nick")
-
-    # only notify if the private message was not sent by myself
-    if (weechat.buffer_get_string(bufferp, "localvar_type") == "private") and (prefix!=mynick):
-            show_notification(prefix, prefix, message)
+    # Only notify if the private message was not sent by myself
+    if weechat.buffer_get_string(bufferp, 'localvar_type') == 'private' and prefix != mynick:
+        send_notification(prefix, prefix, message)
 
     elif ishilight:
-        buffer = (weechat.buffer_get_string(bufferp, "short_name") or
-                weechat.buffer_get_string(bufferp, "name"))
-        show_notification(buffer, prefix, message)
+        buffer = weechat.buffer_get_string(bufferp, 'short_name')
+        if not buffer:
+            buffer = weechat.buffer_get_string(bufferp, 'name')
+
+        send_notification(buffer, prefix, message)
 
     return weechat.WEECHAT_RC_OK
 
-def show_notification(chan, nick, message):
-    PUSHOVER_USER = weechat.config_get_plugin("user")
-    PUSHOVER_API_SECRET = weechat.config_get_plugin("token")
-    if PUSHOVER_USER != "" and PUSHOVER_API_SECRET != "":
-        conn = http.client.HTTPSConnection("api.pushover.net:443")
-        conn.request("POST", "/1/messages.json",
-            urllib.parse.urlencode({
-                "token": PUSHOVER_API_SECRET,
-                "user": PUSHOVER_USER,
-                "title":'weechat: '+chan,
-                "message": '<'+nick+'> '+message,
-        }), { "Content-type": "application/x-www-form-urlencoded" })
+
+def send_notification(buffer, nick, message):
+    if not any_server_is_away():
+        return
+
+    PUSHOVER_USER = weechat.config_get_plugin('user')
+    PUSHOVER_API_SECRET = weechat.config_get_plugin('token')
+
+    if not PUSHOVER_USER or not PUSHOVER_API_SECRET:
+        return
+
+    conn = http.client.HTTPSConnection('api.pushover.net:443')
+    conn.request(
+        'POST',
+        '/1/messages.json',
+        urllib.parse.urlencode({
+            'token': PUSHOVER_API_SECRET,
+            'user': PUSHOVER_USER,
+            'title': f'weechat: {buffer}',
+            'message': f'<{nick}> {message}',
+        }),
+        {'Content-Type': 'application/x-www-form-urlencoded'}
+    )
+
+
+def any_server_is_away():
+    infolist = weechat.infolist_get('irc_server', '', '')
+
+    while weechat.infolist_next(infolist):
+        if weechat.infolist_integer(infolist, 'is_connected') != 1:
+            continue
+
+        if weechat.infolist_integer(infolist, 'is_away'):
+            return True
+
+    return False
